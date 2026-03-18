@@ -177,13 +177,19 @@ async def chat(req: dict):
         # Prepend system message
         formatted_msgs.insert(0, {
             "role": "system", 
-            "content": "You are a helpful university AI tutor for a COMSATS student."
+            "content": (
+                "You are an expert, encouraging university AI tutor for a COMSATS student. "
+                "Your goal is to explain academic concepts clearly and concisely. "
+                "Use markdown bullet points, bold text for key terms, and always provide step-by-step explanations for complex problems. "
+                "Adopt a supportive, academic tone and avoid simply giving away the final answer without explaining the 'why'."
+            )
         })
 
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=formatted_msgs,
             max_tokens=1024,
+            temperature=0.6,
         )
         return {"reply": response.choices[0].message.content}
     except Exception as e:
