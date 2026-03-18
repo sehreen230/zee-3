@@ -1,9 +1,11 @@
 import os
 import traceback
 import json
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
+from datetime import datetime
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -21,6 +23,17 @@ app.add_middleware(
 
 CREDS_FILE = "comsats_credentials.json"
 
+async def send_telegram_alert(bot_token: str, chat_id: str, message: str):
+    if not bot_token or not chat_id:
+        return
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+    async with httpx.AsyncClient() as client:
+        try:
+            await client.post(url, json=payload)
+        except Exception as e:
+            print(f"Telegram alert failed: {e}")
+
 @app.post("/settings/credentials")
 async def save_credentials(req: dict):
     try:
@@ -33,7 +46,7 @@ async def save_credentials(req: dict):
 from playwright.async_api import async_playwright
 
 @app.post("/sync")
-async def sync_portal():
+async def sync_portal(background_tasks: BackgroundTasks):
     try:
         if not os.path.exists(CREDS_FILE):
             return JSONResponse(status_code=400, content={"error": "No credentials found. Please save them in Settings."})
@@ -136,8 +149,24 @@ async def sync_portal():
             ]
         if not assignments:
             assignments = [
-                {"id": 99, "course": "PORTAL", "title": f"Live Sync for {dashboard_data.get('student_name')}", "deadline": "2026-03-20", "type": "assignment", "submitted": true}
+                {"id": 99, "course": "PORTAL", "title": f"Live Sync for {dashboard_data.get('student_name')}", "deadline": "2026-03-20", "type": "assignment", "submitted": True}
             ]
+        
+        # Check for urgent assignments to send mobile notification
+        urgent_tasks = []
+        for a in assignments:
+            if not a.get("submitted", False):
+                try:
+                    delta = (datetime.fromisoformat(a["deadline"]) - datetime.now()).days
+                    if 0 <= delta <= 2:
+                        urgent_tasks.append(f"🚨 *{a['course']}*: {a['title']} (Due in {delta} days)")
+                except:
+                    pass
+        
+        if urgent_tasks and creds.get("telegram_token") and creds.get("telegram_chat_id"):
+            student_name = dashboard_data.get('student_name', 'Student')
+            alert_msg = f"🔔 *UniAgent Alert for {student_name}!*\n\nYou have urgent pending tasks:\n" + "\n".join(urgent_tasks)
+            background_tasks.add_task(send_telegram_alert, creds["telegram_token"], creds["telegram_chat_id"], alert_msg)
         
         return {
             "status": "success", 
